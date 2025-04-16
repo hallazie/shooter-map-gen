@@ -1,8 +1,32 @@
+import random
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from enum import Enum
 from typing import List, Union
+
+
+def draw_basic_color_blocks(width, height, blocks):
+    matrix = np.zeros((height, width))
+    for block in blocks:
+        random_color = random.randint(10, 50)
+        for coord in block:
+            matrix[coord[0], coord[1]] = random_color
+    plt.imshow(np.flipud(matrix.transpose()))
+    plt.show()
+
+
+def draw_basic_rooms(width, height, room_list):
+    matrix = np.zeros((height, width))
+    for room in room_list:
+        ground_set, wall_set = room
+        for coord in ground_set:
+            matrix[coord[0], coord[1]] = 20
+        for coord in wall_set:
+            matrix[coord[0], coord[1]] = 50
+    plt.imshow(np.flipud(matrix.transpose()))
+    plt.show()
 
 
 def visualize_enum_matrix(matrix: Union[np.ndarray, List[List[int]]],
