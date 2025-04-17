@@ -5,6 +5,7 @@
 # @desc:
 
 from matplotlib.collections import LineCollection
+from collections import defaultdict
 
 import random
 import math
@@ -29,6 +30,53 @@ def compute_rng(points):
             if not valid_k.size:
                 edges.append((i, j))
     return edges
+
+
+def has_adjacent_edge(A, B, min_length=2):
+    """
+    判断两个矩形是否存在至少一条重叠或邻接的边，且接触长度≥指定值
+    :param A: 矩形A的(left, right, bottom, top)
+    :param B: 矩形B的(left, right, bottom, top)
+    :param min_length: 要求的最小接触长度，默认4
+    :return: 布尔值表示是否满足条件
+    """
+    # 解包矩形坐标
+    a_l, a_r, a_b, a_t = A
+    b_l, b_r, b_b, b_t = B
+
+    # 检查垂直边对齐（左右边）
+    vertical_checks = [
+        (a_l, b_l),  # A左 vs B左
+        (a_l, b_r),  # A左 vs B右
+        (a_r, b_l),  # A右 vs B左
+        (a_r, b_r)  # A右 vs B右
+    ]
+
+    for x1, x2 in vertical_checks:
+        if x1 == x2:
+            # 计算y轴重叠范围
+            y_overlap_start = max(a_b, b_b)
+            y_overlap_end = min(a_t, b_t)
+            if y_overlap_end - y_overlap_start >= min_length:
+                return True
+
+    # 检查水平边对齐（上下边）
+    horizontal_checks = [
+        (a_b, b_b),  # A底 vs B底
+        (a_b, b_t),  # A底 vs B顶
+        (a_t, b_b),  # A顶 vs B底
+        (a_t, b_t)  # A顶 vs B顶
+    ]
+
+    for y1, y2 in horizontal_checks:
+        if y1 == y2:
+            # 计算x轴重叠范围
+            x_overlap_start = max(a_l, b_l)
+            x_overlap_end = min(a_r, b_r)
+            if x_overlap_end - x_overlap_start >= min_length:
+                return True
+
+    return False
 
 
 def generate_rooms(points, edges, width, height):
@@ -110,13 +158,13 @@ def plot_combined(points, edges, rooms):
     plt.show()
 
 
-def generate_random_points(width=16, height=10, portion=0.1):
+def generate_random_points(width=16, height=10, nodes=10, border_reserve=4):
     """生成稀疏化网格点"""
-    width -= 2
-    height -= 2
+    width -= border_reserve
+    height -= border_reserve
     index_list = [i for i in range(width * height)]
     random.shuffle(index_list)
-    index_list = index_list[:int(width * height * portion)]
+    index_list = index_list[:nodes]
     coord_list = np.array([(i // width, i % width) for i in index_list], dtype=np.float64)
     for i in range(len(coord_list)):
         coord = coord_list[i]
@@ -133,13 +181,43 @@ def generate_random_points(width=16, height=10, portion=0.1):
             elif coord[1] < other[1] and other[1] - coord[1] <= 1:
                 coord_list[j][1] -= 1
     for i in range(len(coord_list)):
-        coord_list[i][0] += 1
-        coord_list[i][1] += 1
+        coord_list[i][0] += border_reserve // 2
+        coord_list[i][1] += border_reserve // 2
     return coord_list
 
 
-def expand_non_connected_rooms(points, edges, rooms):
-    return rooms
+def expand_non_connected_rooms(room_list, edge_list, point_list):
+    edge_map = defaultdict(list)
+    for p1, p2 in edge_list:
+        edge_map[p1].append(p2)
+        edge_map[p2].append(p1)
+    center_list = [(int(x), int(y)) for x, y in point_list]
+    for i in range(len(center_list)):
+        room_border = list(room_list[i])
+        room_center = center_list[i]
+        for j in edge_map[i]:
+            neighbor_border = list(room_list[j])
+            neighbor_center = center_list[j]
+            for _ in range(10):
+                valid_adj = has_adjacent_edge(room_border, neighbor_border)
+                print(f'{room_center}({room_border})-{neighbor_center}({neighbor_border}) has adj border: {valid_adj}')
+                if valid_adj:
+                    room_list[i] = tuple(room_border)
+                    break
+                expand_horz = random.randint(-10, 10) > 0
+                if expand_horz:
+                    expand_step = 1 if room_center[0] < neighbor_center[0] else -1
+                    if expand_step == 1:
+                        room_border[1] += expand_step
+                    else:
+                        room_border[0] += expand_step
+                else:
+                    expand_step = 1 if room_center[1] < neighbor_center[1] else -1
+                    if expand_step == 1:
+                        room_border[3] += expand_step
+                    else:
+                        room_border[2] += expand_step
+    return room_list
 
 
 def room_to_blocks(rooms):
@@ -184,7 +262,6 @@ def refine_room_with_walls(original_cells):
 
     # 检测原始边界
     walls = set()
-    grounds = set()
     for x, y in refined:
         # 检查四个方向的邻居
         neighbors = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
@@ -197,74 +274,37 @@ def refine_room_with_walls(original_cells):
 
         for i, (nx, ny) in enumerate(neighbors):
             if (nx, ny) not in refined:
-                # 标准化墙体方向
-                a, b = sorted([borders[i][0], borders[i][1]])
-                # walls.add((a, b))
-                walls.add(a)
+                walls.add((x, y))
 
-    # # 合并相邻墙体
-    # merged = []
-    # horizontal = {}  # key: y坐标，value: (min_x, max_x)
-    # vertical = {}  # key: x坐标，value: (min_y, max_y)
-    #
-    # for (x1, y1), (x2, y2) in walls:
-    #     if y1 == y2:  # 水平墙
-    #         y = y1
-    #         x_start = min(x1, x2)
-    #         x_end = max(x1, x2)
-    #         if y not in horizontal:
-    #             horizontal[y] = []
-    #         horizontal[y].append((x_start, x_end))
-    #     else:  # 垂直墙
-    #         x = x1
-    #         y_start = min(y1, y2)
-    #         y_end = max(y1, y2)
-    #         if x not in vertical:
-    #             vertical[x] = []
-    #         vertical[x].append((y_start, y_end))
-    #
-    # # 合并水平墙
-    # for y in horizontal:
-    #     segments = sorted(horizontal[y])
-    #     current_start, current_end = segments[0]
-    #     for s, e in segments[1:]:
-    #         if s <= current_end:
-    #             current_end = max(current_end, e)
-    #         else:
-    #             merged.append(((current_start, y), (current_end, y)))
-    #             current_start, current_end = s, e
-    #     merged.append(((current_start, y), (current_end, y)))
-    #
-    # # 合并垂直墙
-    # for x in vertical:
-    #     segments = sorted(vertical[x])
-    #     current_start, current_end = segments[0]
-    #     for s, e in segments[1:]:
-    #         if s <= current_end:
-    #             current_end = max(current_end, e)
-    #         else:
-    #             merged.append(((x, current_start), (x, current_end)))
-    #             current_start, current_end = s, e
-    #     merged.append(((x, current_start), (x, current_end)))
-    #
-    # return merged
-    return refined, walls
+    shifted = set()
+    for x, y in walls:
+        y += 1 if y % 2 != 0 else 0
+        x += 1 if x % 2 != 0 else 0
+        shifted.add((x, y))
+    fill = set()
+    for x, y in shifted:
+        if (x+2, y) in shifted:
+            fill.add((x+1, y))
+        if (x, y+2) in shifted:
+            fill.add((x, y+1))
+    shifted |= fill
+
+    return refined, shifted
 
 
 def run():
     # 生成随机点集
-    width = 20
-    height = 10
-    points = generate_random_points(width=width, height=height)
+    width = 30
+    height = 30
+    points = generate_random_points(width=width, height=height, nodes=12, border_reserve=10)
 
     # 计算RNG边
     edges = compute_rng(points)
 
     # 生成房间布局
     rooms = generate_rooms(points, edges, width, height)
+    rooms = expand_non_connected_rooms(rooms, edges, points)
     # rooms = []
-
-    rooms = expand_non_connected_rooms(points, edges, rooms)
 
     from src.draw_map import draw_basic_color_blocks, draw_basic_rooms
     blocks = room_to_blocks(rooms)
