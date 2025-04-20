@@ -158,31 +158,90 @@ def plot_combined(points, edges, rooms):
     plt.show()
 
 
-def generate_random_points(width=16, height=10, nodes=10, border_reserve=4):
+def generate_random_points(width=16, height=10, nodes=10, border_reserve=4, min_gap=4, max_gap=8):
     """生成稀疏化网格点"""
     width -= border_reserve
     height -= border_reserve
     index_list = [i for i in range(width * height)]
+    point_list = [(i // width ,i % width) for i in range(width * height)]
     random.shuffle(index_list)
-    index_list = index_list[:nodes]
-    coord_list = np.array([(i // width, i % width) for i in index_list], dtype=np.float64)
-    for i in range(len(coord_list)):
-        coord = coord_list[i]
-        for j in range(i, len(coord_list)):
-            if i == j:
+    # point_list = [point_list[i] for i in index_list]
+    random.shuffle(point_list)
+    coord_list = [(width//2, height//2)]
+    print(f'adding random points: {point_list[0]}')
+    for _ in range(10):
+        random.shuffle(point_list)
+        if len(coord_list) > nodes:
+            break
+        for other in point_list:
+            if other in coord_list:
                 continue
-            other = coord_list[j]
-            if coord[0] > other[0] and coord[0] - other[0] <= 1:
-                coord_list[j][0] += 1
-            elif coord[0] < other[0] and other[0] - coord[0] <= 1:
-                coord_list[j][0] -= 1
-            if coord[1] > other[1] and coord[1] - other[1] <= 1:
-                coord_list[j][1] += 1
-            elif coord[1] < other[1] and other[1] - coord[1] <= 1:
-                coord_list[j][1] -= 1
-    for i in range(len(coord_list)):
-        coord_list[i][0] += border_reserve // 2
-        coord_list[i][1] += border_reserve // 2
+            if len(coord_list) > nodes:
+                break
+            min_valid = True
+            max_valid = False
+            for coord in coord_list:
+                if abs(coord[0] - other[0]) + abs(coord[1] - other[1]) < max_gap * 2:
+                    max_valid = True
+                if abs(coord[0] - other[0]) + abs(coord[1] - other[1]) < min_gap * 2:
+                    min_valid = False
+                    break
+            if min_valid and max_valid:
+                coord_list.append(other)
+    coord_list = np.array(coord_list)
+    coord_list += np.array([border_reserve//2, border_reserve//2])
+    return coord_list
+
+
+def generate_random_points_ds(width=16, height=10, nodes=10, border_reserve=4, min_gap=4, max_gap=8):
+    """生成稀疏化网格点"""
+    adjusted_width = width - border_reserve
+    adjusted_height = height - border_reserve
+
+    # 生成所有可能的网格点（调整后的坐标系）
+    point_list = [(y, x) for y in range(adjusted_height) for x in range(adjusted_width)]
+    random.shuffle(point_list)
+
+    # 初始化点集合：从中心点开始
+    start_y = adjusted_height // 2
+    start_x = adjusted_width // 2
+    coord_list = [(start_y, start_x)]
+
+    for _ in range(10):  # 最多尝试10次填充循环
+        random.shuffle(point_list)
+        if len(coord_list) >= nodes:
+            break
+
+        for other in point_list:
+            if len(coord_list) >= nodes:
+                break
+            if other in coord_list:
+                continue
+
+            # 检查最小间距条件
+            min_valid = True
+            for coord in coord_list:
+                dy = abs(coord[0] - other[0])
+                dx = abs(coord[1] - other[1])
+                if dy + dx <= min_gap:
+                    min_valid = False
+                    break
+            if not min_valid:
+                continue
+
+            # 检查最大邻接条件
+            max_valid = False
+            for coord in coord_list:
+                dy = abs(coord[0] - other[0])
+                dx = abs(coord[1] - other[1])
+                if dy + dx <= max_gap:
+                    max_valid = True
+                    break
+            if max_valid:
+                coord_list.append(other)
+
+    # 将坐标调整回原始坐标系
+    coord_list = np.array(coord_list) + border_reserve // 2
     return coord_list
 
 
@@ -200,7 +259,7 @@ def expand_non_connected_rooms(room_list, edge_list, point_list):
             neighbor_center = center_list[j]
             for _ in range(10):
                 valid_adj = has_adjacent_edge(room_border, neighbor_border)
-                print(f'{room_center}({room_border})-{neighbor_center}({neighbor_border}) has adj border: {valid_adj}')
+                # print(f'{room_center}({room_border})-{neighbor_center}({neighbor_border}) has adj border: {valid_adj}')
                 if valid_adj:
                     room_list[i] = tuple(room_border)
                     break
@@ -234,10 +293,12 @@ def room_to_blocks(rooms):
 def resolve_blocks_overlapping(block_list):
     occupied = []
     block_resolve_list = []
+    block_list = sorted(block_list, key=lambda x: len(x), reverse=False)
     for block in block_list:
         block_resolve = []
         for pos in block:
             if pos not in occupied:
+                occupied.append(pos)
                 block_resolve.append(pos)
         block_resolve_list.append(block_resolve)
     return block_resolve_list
@@ -294,16 +355,16 @@ def refine_room_with_walls(original_cells):
 
 def run():
     # 生成随机点集
-    width = 30
-    height = 30
-    points = generate_random_points(width=width, height=height, nodes=12, border_reserve=10)
+    width = 48
+    height = 48
+    points = generate_random_points(width=width, height=height, nodes=12, border_reserve=4)
 
     # 计算RNG边
     edges = compute_rng(points)
 
     # 生成房间布局
     rooms = generate_rooms(points, edges, width, height)
-    rooms = expand_non_connected_rooms(rooms, edges, points)
+    # rooms = expand_non_connected_rooms(rooms, edges, points)
     # rooms = []
 
     from src.draw_map import draw_basic_color_blocks, draw_basic_rooms
